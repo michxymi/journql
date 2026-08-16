@@ -19,7 +19,7 @@ endif
 BUILD_DIR  := build/$(NAME)_$(VERSION)_$(ARCH)
 DEB_FILE   := build/$(NAME)_$(VERSION)_$(ARCH).deb
 
-.PHONY: all clean deb fetch-duckdb stage lint
+.PHONY: all clean deb fetch-duckdb stage lint pre-commit
 
 all: deb
 
@@ -68,6 +68,9 @@ stage: fetch-duckdb
 deb: stage
 	dpkg-deb --build --root-owner-group -Zxz $(BUILD_DIR)
 	@echo "Built $(BUILD_DIR).deb"
+
+pre-commit:
+	pre-commit run --all-files
 
 lint: deb
 	lintian $(BUILD_DIR).deb
