@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+chmod 755 /usr/lib/journql/duckdb
+chmod 755 /usr/bin/journql
+
+if ! getent group systemd-journal >/dev/null; then
+    echo "Warning: systemd-journal group not found." >&2
+fi
+
+echo "journql installed. Add your user to the systemd-journal group" >&2
+echo "to read logs without sudo: sudo usermod -aG systemd-journal \$USER" >&2
+
+exit 0

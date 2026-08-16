@@ -1,0 +1,10 @@
+Package: journql
+Version: __VERSION__
+Section: utils
+Priority: optional
+Architecture: __ARCH__
+Depends: systemd
+Maintainer: Michael Xymitoulias <michxymi@gmail.com>
+Description: Query systemd journal logs with SQL via DuckDB
+ journql wraps journalctl output and pipes it into a bundled DuckDB
+ instance, allowing SQL queries over journal logs.
