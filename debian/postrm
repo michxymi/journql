@@ -5,6 +5,9 @@ case "$1" in
     purge|remove)
         rm -rf /usr/lib/journql
         ;;
+    *)
+        :
+        ;;
 esac
 
 exit 0

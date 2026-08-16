@@ -1,0 +1,30 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      #- id: check-ast
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: check-yaml
+        exclude: '^\.github/workflows/.*\.ya?ml$'
+      - id: check-yaml
+        name: "check GitHub Actions workflows"
+        files: '^\.github/workflows/.*\.ya?ml$'
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        exclude: |
+          (?x)^(
+          .gitignore|
+          .*\.md
+          )$
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        # Emulate BashSupport Pro:
+        # -x           - follow 'source' statements, even when the file is not specified as input
+        # -P SCRIPTDIR - when looking a "source=" directives, look relative to the directory the script is in
+        # Also, see ./shellcheckrc, where extra checks are enabled and disabled
+        args: [ -x, -P, SCRIPTDIR, -e, SC2248, -e, SC2250 ]
