@@ -21,6 +21,17 @@ jobs:
 
       - uses: pre-commit/action@v3.0.1
 
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Run tests
+        run: make test
+
   build-deb:
     name: build deb (${{ matrix.arch }})
     runs-on: ubuntu-latest

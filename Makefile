@@ -19,7 +19,7 @@ endif
 BUILD_DIR  := build/$(NAME)_$(VERSION)_$(ARCH)
 DEB_FILE   := build/$(NAME)_$(VERSION)_$(ARCH).deb
 
-.PHONY: all clean deb fetch-duckdb stage lint pre-commit changelog
+.PHONY: all clean deb fetch-duckdb stage lint pre-commit changelog test
 
 all: deb
 
@@ -80,6 +80,9 @@ deb: stage
 
 pre-commit:
 	pre-commit run --all-files
+
+test:
+	test/bats/bin/bats test/journql.bats
 
 lint: deb
 	lintian $(BUILD_DIR).deb
