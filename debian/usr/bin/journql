@@ -44,6 +44,10 @@ Journal Selection controls:
   --grep, --ignore-case, --dmesg
                           Select by text pattern, case handling, or kernel
                           source.
+  --case-sensitive[=BOOLEAN]
+                          Control case handling for --grep patterns. The
+                          --ignore-case and -i compatibility forms are
+                          translated to --case-sensitive=no.
   --lines and --reverse  Limit the Journal Selection and reverse its order.
   FIELD=VALUE and +      Use native field matches and the journal disjunction
                           operator. Path matches are not supported.
@@ -51,8 +55,9 @@ Journal Selection controls:
 Documented short forms and separate-value forms for these journalctl
 selection controls are allowed. journql keeps control of the output format,
 complete field values, and pager behavior.
-Short forms include -m, -b, -u, -t, -p, -g, -i, -k, -n, and -r. A value can
-use a separate argument or the documented --option=value form.
+Short forms include -m, -b, -u, -t, -p, -g, -i, -k, -n, and -r.
+Time and cursor short forms are -S, -U, and -c.
+A value can use a separate argument or the documented --option=value form.
 
 The default Journal Selection is the normal journalctl selection. journql does
 not add a time or size limit. It runs with the current user's authority. Add
@@ -209,6 +214,52 @@ if ! command -v journalctl >/dev/null 2>&1; then
 fi
 journalctl_command=journalctl
 
+selection_error() {
+    usage_error "unsupported Journal Selection argument: $1"
+}
+
+selection_value_error() {
+    usage_error "Journal Selection option $1 needs a value."
+}
+
+selection_value_is_present() {
+    if [ "$#" -lt 2 ] || [ "$2" = '--' ] || [ "$2" = "$selection_sentinel" ]; then
+        selection_value_error "$1"
+    fi
+}
+
+field_match_is_valid() {
+    field_name=${1%%=*}
+    case "$field_name" in
+        ''|*[!A-Z0-9_]*)
+            return 1
+            ;;
+        [A-Z_]* )
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+run_journalctl_selection() {
+    if [ "$1" = "$selection_sentinel" ]; then
+        shift
+        "$journalctl_command" "$@" --output=json --all --no-pager >"$snapshot"
+        return $?
+    fi
+
+    if [ "$#" -gt 0 ]; then
+        selection_argument=$1
+        shift
+        run_journalctl_selection "$@" "$selection_argument"
+        return $?
+    fi
+
+    usage_error 'a Journal Query needs a second -- separator.'
+}
+
 collect_selection() {
     if [ "$#" -eq 0 ]; then
         usage_error 'a Journal Query needs a second -- separator.'
@@ -225,7 +276,7 @@ collect_selection() {
             usage_error 'the command needs exactly one Journal Query argument after the second -- separator.'
         fi
         shift
-        "$journalctl_command" "$@" --output=json --all --no-pager >"$snapshot"
+        run_journalctl_selection "$@" "$selection_sentinel"
         return $?
     fi
 
@@ -233,9 +284,136 @@ collect_selection() {
         usage_error 'a Journal Query needs a second -- separator.'
     fi
 
-    selection_argument=$1
-    shift
-    collect_selection "$@" "$selection_argument"
+    case "$1" in
+        --system|--user|--merge|-m|--reverse|-r|--dmesg|-k|--case-sensitive)
+            selection_argument=$1
+            shift
+            collect_selection "$@" "$selection_argument"
+            ;;
+        --ignore-case|-i)
+            selection_argument=--case-sensitive=no
+            shift
+            collect_selection "$@" "$selection_argument"
+            ;;
+        --since|--until|--cursor|--after-cursor|--unit|--user-unit|--identifier|--priority|--facility|--grep|-S|-U|-c|-u|-t|-p|-g)
+            selection_argument=$1
+            selection_value_is_present "$@"
+            selection_value=$2
+            shift 2
+            collect_selection "$@" "$selection_argument" "$selection_value"
+            ;;
+        --since=*|--until=*|--cursor=*|--after-cursor=*|--unit=*|--user-unit=*|--identifier=*|--priority=*|--facility=*|--grep=*)
+            case "$1" in
+                *=)
+                    selection_value_error "${1%%=*}"
+                    ;;
+                *)
+                    :
+                    ;;
+            esac
+            selection_argument=$1
+            shift
+            collect_selection "$@" "$selection_argument"
+            ;;
+        --boot=*|--boot|-b)
+            case "$1" in
+                --boot=)
+                    selection_value_error '--boot'
+                    ;;
+                --boot=*)
+                    selection_argument=$1
+                    shift
+                    collect_selection "$@" "$selection_argument"
+                    return $?
+                    ;;
+                *)
+                    :
+                    ;;
+            esac
+            selection_argument=$1
+            shift
+            if [ "$#" -gt 0 ] && [ "$1" != '--' ] && [ "$1" != "$selection_sentinel" ]; then
+                case "$1" in
+                    --*|+|*=*)
+                        ;;
+                    *)
+                        selection_value=$1
+                        shift
+                        collect_selection "$@" "$selection_argument" "$selection_value"
+                        return $?
+                        ;;
+                esac
+            fi
+            collect_selection "$@" "$selection_argument"
+            ;;
+        --lines=*|--lines|-n)
+            case "$1" in
+                --lines=)
+                    selection_value_error '--lines'
+                    ;;
+                --lines=*)
+                    selection_argument=$1
+                    shift
+                    collect_selection "$@" "$selection_argument"
+                    return $?
+                    ;;
+                *)
+                    :
+                    ;;
+            esac
+            selection_argument=$1
+            shift
+            if [ "$#" -gt 0 ] && [ "$1" != '--' ] && [ "$1" != "$selection_sentinel" ]; then
+                case "$1" in
+                    all|+*[0-9]|[0-9]*)
+                        selection_value=$1
+                        shift
+                        collect_selection "$@" "$selection_argument" "$selection_value"
+                        return $?
+                        ;;
+                    *)
+                        :
+                        ;;
+                esac
+            fi
+            collect_selection "$@" "$selection_argument"
+            ;;
+        --case-sensitive=*)
+            case "$1" in
+                --case-sensitive=)
+                    selection_value_error '--case-sensitive'
+                    ;;
+                *)
+                    :
+                    ;;
+            esac
+            selection_argument=$1
+            shift
+            collect_selection "$@" "$selection_argument"
+            ;;
+        -S?*|-U?*|-c?*|-u?*|-t?*|-p?*|-g?*|-b?*|-n?*)
+            selection_argument=$1
+            shift
+            collect_selection "$@" "$selection_argument"
+            ;;
+        *=*)
+            field_match_is_valid "$1" || selection_error "$1"
+            selection_argument=$1
+            shift
+            collect_selection "$@" "$selection_argument"
+            ;;
+        +)
+            selection_argument=$1
+            shift
+            collect_selection "$@" "$selection_argument"
+            ;;
+        *)
+            if [ "$2" = "$selection_sentinel" ]; then
+                usage_error 'a Journal Query needs a second -- separator.'
+            fi
+            selection_error "$1"
+            ;;
+    esac
 }
 
 collect_selection "$@" "$selection_sentinel"

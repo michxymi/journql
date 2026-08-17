@@ -190,3 +190,89 @@ EOF
   assert_stderr --partial 'invalid format: yaml' || return 1
   [[ ! -e "$dependency_marker" ]]
 }
+
+@test "allowed Journal Selection controls pass to journalctl in order" {
+  run --separate-stderr "$command_path" -- \
+    --system --user -m \
+    --since '2026-08-17 00:00:00' --until='2026-08-17 23:59:59' \
+    -c cursor-value --after-cursor=after-value -b -1 \
+    --unit sshd.service --user-unit session-1.scope \
+    -t sshd -p 3 --facility=auth -g failed --case-sensitive=no -k \
+    --lines=25 -n 10 -r MESSAGE=failed + _SYSTEMD_UNIT=sshd.service \
+    -- 'SELECT 1'
+
+  assert_success || return 1
+  assert_stderr '' || return 1
+  assert_equal "$(cat "$JOURNQL_TEST_JOURNALCTL_ARGS")" $'--system\n--user\n-m\n--since\n2026-08-17 00:00:00\n--until=2026-08-17 23:59:59\n-c\ncursor-value\n--after-cursor=after-value\n-b\n-1\n--unit\nsshd.service\n--user-unit\nsession-1.scope\n-t\nsshd\n-p\n3\n--facility=auth\n-g\nfailed\n--case-sensitive=no\n-k\n--lines=25\n-n\n10\n-r\nMESSAGE=failed\n+\n_SYSTEMD_UNIT=sshd.service\n--output=json\n--all\n--no-pager' || return 1
+}
+
+@test "native field matches and the disjunction operator are allowed" {
+  run --separate-stderr "$command_path" -- \
+    'MESSAGE=failed' + '_SYSTEMD_UNIT=sshd.service' -- 'SELECT 1'
+
+  assert_success || return 1
+  assert_stderr '' || return 1
+  assert_equal "$(cat "$JOURNQL_TEST_JOURNALCTL_ARGS")" $'MESSAGE=failed\n+\n_SYSTEMD_UNIT=sshd.service\n--output=json\n--all\n--no-pager' || return 1
+}
+
+@test "legacy ignore-case selection forms use the supported journalctl control" {
+  run --separate-stderr "$command_path" -- -i --case-sensitive=yes -- 'SELECT 1'
+
+  assert_success || return 1
+  assert_stderr '' || return 1
+  assert_equal "$(cat "$JOURNQL_TEST_JOURNALCTL_ARGS")" $'--case-sensitive=no\n--case-sensitive=yes\n--output=json\n--all\n--no-pager' || return 1
+
+  run --separate-stderr "$command_path" -- --ignore-case -- 'SELECT 1'
+
+  assert_success || return 1
+  assert_stderr '' || return 1
+  assert_equal "$(cat "$JOURNQL_TEST_JOURNALCTL_ARGS")" $'--case-sensitive=no\n--output=json\n--all\n--no-pager' || return 1
+}
+
+@test "optional Journal Selection controls accept long and separate-value forms" {
+  run --separate-stderr "$command_path" -- \
+    --boot --lines 12 --case-sensitive -- 'SELECT 1'
+
+  assert_success || return 1
+  assert_stderr '' || return 1
+  assert_equal "$(cat "$JOURNQL_TEST_JOURNALCTL_ARGS")" $'--boot\n--lines\n12\n--case-sensitive\n--output=json\n--all\n--no-pager' || return 1
+}
+
+@test "unsupported Journal Selection arguments fail before journal access" {
+  local rejected_argument
+  for rejected_argument in \
+    --machine=container --directory=/var/log/journal --file=/var/log/messages \
+    --root=/ --image=container --namespace=name \
+    --output=short --output-fields=MESSAGE --all --full --no-pager --pager \
+    --follow --cursor-file=/tmp/cursor --list-boots --header --fields=MESSAGE \
+    --disk-usage --verify --sync --flush --rotate --vacuum-time=1s \
+    --vacuum-size=1K --vacuum-files=1 --catalog --update-catalog --new-id128 \
+    /var/log/messages; do
+    run --separate-stderr "$command_path" -- "$rejected_argument" -- 'SELECT 1'
+
+    assert_equal "$status" 2 || return 1
+    assert_stderr --partial 'unsupported Journal Selection argument' || return 1
+  done
+  [[ ! -e "$dependency_marker" ]]
+}
+
+@test "a path match and other positional arguments fail with status 2" {
+  for positional_argument in /var/log/messages sshd.service; do
+    run --separate-stderr "$command_path" -- "$positional_argument" -- 'SELECT 1'
+
+    assert_equal "$status" 2 || return 1
+    assert_stderr --partial 'unsupported Journal Selection argument' || return 1
+  done
+  [[ ! -e "$dependency_marker" ]]
+}
+
+@test "selection options that need values reject missing values" {
+  for missing_value_option in --since --until --cursor --after-cursor --unit \
+    --user-unit --identifier --priority --facility --grep -S -U -c -u -t -p -g; do
+    run --separate-stderr "$command_path" -- "$missing_value_option" -- 'SELECT 1'
+
+    assert_equal "$status" 2 || return 1
+    assert_stderr --partial 'needs a value' || return 1
+  done
+  [[ ! -e "$dependency_marker" ]]
+}
