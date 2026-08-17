@@ -106,6 +106,7 @@ if [ "$#" -eq 1 ]; then
 fi
 
 format_seen=0
+format_value=table
 help_seen=0
 version_seen=0
 first_separator_found=0
@@ -279,4 +280,4 @@ FROM read_json_objects('$snapshot_sql_path');
 EOF
 )
 
-printf '%s\n' "$journal_query" | "$duckdb_command" -table :memory: -cmd "$bootstrap_sql"
+printf '%s\n' "$journal_query" | "$duckdb_command" "-${format_value}" :memory: -cmd "$bootstrap_sql"

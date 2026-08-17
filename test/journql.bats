@@ -120,15 +120,30 @@ EOF
   [[ -z "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'journql.*' -print -quit)" ]]
 }
 
-@test "format options accept separate and equals-value forms" {
+@test "the default and selected formats use the matching DuckDB formatter" {
+  run --separate-stderr "$command_path" -- -- 'SELECT 1'
+  assert_success || return 1
+  assert_equal "$(sed -n '1p' "$JOURNQL_TEST_DUCKDB_ARGS")" '-table' || return 1
+
   run --separate-stderr "$command_path" --format table -- -- 'SELECT 1'
   assert_success || return 1
+  assert_equal "$(sed -n '1p' "$JOURNQL_TEST_DUCKDB_ARGS")" '-table' || return 1
 
   run --separate-stderr "$command_path" --format=csv -- -- 'SELECT 1'
   assert_success || return 1
+  assert_equal "$(sed -n '1p' "$JOURNQL_TEST_DUCKDB_ARGS")" '-csv' || return 1
 
   run --separate-stderr "$command_path" --format json -- -- 'SELECT 1'
   assert_success || return 1
+  assert_equal "$(sed -n '1p' "$JOURNQL_TEST_DUCKDB_ARGS")" '-json' || return 1
+}
+
+@test "one Journal Query can contain multiple SQL statements" {
+  run --separate-stderr "$command_path" -- -- 'CREATE TABLE result AS SELECT 1 AS value; SELECT value FROM result;'
+
+  assert_success || return 1
+  assert_stderr '' || return 1
+  assert_equal "$(cat "$JOURNQL_TEST_DUCKDB_INPUT")" 'CREATE TABLE result AS SELECT 1 AS value; SELECT value FROM result;' || return 1
 }
 
 @test "a Journal Query needs both separators" {
