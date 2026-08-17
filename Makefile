@@ -8,8 +8,10 @@ DUCKDB_URL := https://github.com/duckdb/duckdb/releases/download/v$(DUCKDB_VER)/
 
 ifeq ($(ARCH), amd64)
 	DUCKDB_SHA256 := ff4ef9ec59fe3e1a1f3dd1004c6218d1fd59c0533c185c968c4403fd0240d02b
+	STRIP := x86_64-linux-gnu-strip
 else ifeq ($(ARCH), arm64)
 	DUCKDB_SHA256 := c6d1c19631bb4d7a2a5dcf30586d888e167ce6fb22396060110c7a32e2bfc298
+	STRIP := aarch64-linux-gnu-strip
 endif
 
 BUILD_DIR  := build/$(NAME)_$(VERSION)_$(ARCH)
@@ -43,7 +45,7 @@ stage: fetch-duckdb
 	# DuckDB binary
 	unzip -o build/cache/duckdb-$(DUCKDB_VER)-$(ARCH).zip -d $(BUILD_DIR)/usr/lib/$(NAME)/
 	chmod 755 $(BUILD_DIR)/usr/lib/$(NAME)/duckdb
-	strip --strip-unneeded $(BUILD_DIR)/usr/lib/$(NAME)/duckdb
+	$(STRIP) --strip-unneeded $(BUILD_DIR)/usr/lib/$(NAME)/duckdb
 
 	# Control files, with version/arch substituted
 	sed -e 's/__VERSION__/$(VERSION)+duckdb$(DUCKDB_VER)/' \

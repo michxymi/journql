@@ -31,6 +31,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y unzip binutils-x86-64-linux-gnu binutils-aarch64-linux-gnu
+
       - name: Cache duckdb download
         uses: actions/cache@v4
         with:
