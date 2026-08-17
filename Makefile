@@ -43,6 +43,7 @@ stage: fetch-duckdb
 	# DuckDB binary
 	unzip -o build/cache/duckdb-$(DUCKDB_VER)-$(ARCH).zip -d $(BUILD_DIR)/usr/lib/$(NAME)/
 	chmod 755 $(BUILD_DIR)/usr/lib/$(NAME)/duckdb
+	strip --strip-unneeded $(BUILD_DIR)/usr/lib/$(NAME)/duckdb
 
 	# Control files, with version/arch substituted
 	sed -e 's/__VERSION__/$(VERSION)+duckdb$(DUCKDB_VER)/' \

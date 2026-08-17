@@ -1,0 +1,2 @@
+# DuckDB is distributed as a prebuilt third-party binary.
+hardening-no-pie [usr/lib/journql/duckdb]
