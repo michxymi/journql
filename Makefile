@@ -4,11 +4,7 @@ NAME       := journql
 VERSION    := $(shell cat VERSION)
 ARCH       ?= amd64
 DUCKDB_VER := 1.4.5
-DUCKDB_ASSET_ARCH := $(ARCH)
-ifeq ($(ARCH), arm64)
-	DUCKDB_ASSET_ARCH := aarch64
-endif
-DUCKDB_URL := https://github.com/duckdb/duckdb/releases/download/v$(DUCKDB_VER)/duckdb_cli-linux-$(DUCKDB_ASSET_ARCH).zip
+DUCKDB_URL := https://github.com/duckdb/duckdb/releases/download/v$(DUCKDB_VER)/duckdb_cli-linux-$(ARCH).zip
 
 ifeq ($(ARCH), amd64)
 	DUCKDB_SHA256 := ff4ef9ec59fe3e1a1f3dd1004c6218d1fd59c0533c185c968c4403fd0240d02b
@@ -27,7 +23,7 @@ fetch-duckdb:
 	$(call check_defined, DUCKDB_SHA256, Set DUCKDB_SHA256 for ARCH=$(ARCH) in the Makefile)
 	mkdir -p build/cache
 	if [ ! -f build/cache/duckdb-$(DUCKDB_VER)-$(ARCH).zip ]; then \
-		curl -L --retry 3 -o build/cache/duckdb-$(DUCKDB_VER)-$(ARCH).zip $(DUCKDB_URL); \
+		curl -L --fail --retry 3 -o build/cache/duckdb-$(DUCKDB_VER)-$(ARCH).zip $(DUCKDB_URL); \
 	fi
 	echo "$(DUCKDB_SHA256)  build/cache/duckdb-$(DUCKDB_VER)-$(ARCH).zip" | sha256sum -c -
 
