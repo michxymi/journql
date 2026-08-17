@@ -5,6 +5,8 @@ VERSION    := $(shell cat VERSION)
 ARCH       ?= amd64
 DUCKDB_VER := 1.4.5
 DUCKDB_URL := https://github.com/duckdb/duckdb/releases/download/v$(DUCKDB_VER)/duckdb_cli-linux-$(ARCH).zip
+PACKAGE_VERSION := $(VERSION)+duckdb$(DUCKDB_VER)
+CHANGELOG_FILE  := debian/changelog
 
 ifeq ($(ARCH), amd64)
 	DUCKDB_SHA256 := ff4ef9ec59fe3e1a1f3dd1004c6218d1fd59c0533c185c968c4403fd0240d02b
@@ -17,9 +19,15 @@ endif
 BUILD_DIR  := build/$(NAME)_$(VERSION)_$(ARCH)
 DEB_FILE   := build/$(NAME)_$(VERSION)_$(ARCH).deb
 
-.PHONY: all clean deb fetch-duckdb stage lint pre-commit
+.PHONY: all clean deb fetch-duckdb stage lint pre-commit changelog
 
 all: deb
+
+changelog:
+	git-cliff --config cliff-debian.toml \
+		--unreleased \
+		--tag "$(PACKAGE_VERSION)" \
+		--output "$(CHANGELOG_FILE)"
 
 fetch-duckdb:
 	$(call check_defined, DUCKDB_SHA256, Set DUCKDB_SHA256 for ARCH=$(ARCH) in the Makefile)
@@ -39,6 +47,8 @@ stage: fetch-duckdb
 	cp -r debian/usr $(BUILD_DIR)/
 	chmod 755 $(BUILD_DIR)/usr/bin/journql
 	install -m 644 debian/copyright $(BUILD_DIR)/usr/share/doc/$(NAME)/copyright
+	install -m 644 $(CHANGELOG_FILE) $(BUILD_DIR)/usr/share/doc/$(NAME)/changelog
+	gzip -n -9 $(BUILD_DIR)/usr/share/doc/$(NAME)/changelog
 	install -m 644 LICENSE $(BUILD_DIR)/usr/share/doc/$(NAME)/LICENSE
 	install -m 644 NOTICE $(BUILD_DIR)/usr/share/doc/$(NAME)/NOTICE
 
@@ -48,7 +58,7 @@ stage: fetch-duckdb
 	$(STRIP) --strip-unneeded $(BUILD_DIR)/usr/lib/$(NAME)/duckdb
 
 	# Control files, with version/arch substituted
-	sed -e 's/__VERSION__/$(VERSION)+duckdb$(DUCKDB_VER)/' \
+	sed -e 's/__VERSION__/$(PACKAGE_VERSION)/' \
 	    -e 's/__ARCH__/$(ARCH)/' \
 	    debian/control > $(BUILD_DIR)/DEBIAN/control
 	install -m 755 debian/postinst $(BUILD_DIR)/DEBIAN/postinst

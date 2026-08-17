@@ -1,0 +1,23 @@
+journql (0.0.1+duckdb1.4.5) unstable; urgency=medium
+
+
+  * Add deb package
+
+  * Add apache 2.0 license docs
+
+  * Add code quality tools and fix raised issues
+
+  * Add pre-commit command in Makefile
+
+  * Update code quality tool configs
+
+  * Add github actions workflow
+
+  * Correct url for duckdb arm64 binary
+
+  * Address lintian errors
+
+  * Use appropriate stripping tool per arch
+
+
+ -- Michael Xymitoulias <michxymi@gmail.com>  Mon, 17 Aug 2026 12:52:05 +0000

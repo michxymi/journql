@@ -1,0 +1,17 @@
+[changelog]
+trim = false
+render_always = true
+body = """
+journql ({{ version }}) unstable; urgency=medium
+
+{% for commit in commits %}
+  * {{ commit.message | upper_first }}
+{% endfor %}
+
+ -- Michael Xymitoulias <michxymi@gmail.com>  {{ timestamp | date(format="%a, %d %b %Y %H:%M:%S") }} +0000
+
+"""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
