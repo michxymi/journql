@@ -185,20 +185,98 @@ if [ "${first_separator_found}" -eq 0 ]; then
     usage_error 'a Journal Query needs two -- separators.'
 fi
 
-while [ "$#" -gt 0 ] && [ "$1" != '--' ]; do
+temporary_directory=${TMPDIR:-/tmp}
+snapshot=$(mktemp "$temporary_directory/journql.XXXXXXXXXX") || {
+    printf 'journql: cannot create a private Journal Selection snapshot.\n' >&2
+    exit 1
+}
+
+cleanup_snapshot() {
+    rm -f -- "$snapshot"
+}
+
+trap cleanup_snapshot 0
+trap 'exit 129' 1
+trap 'exit 130' 2
+trap 'exit 143' 15
+
+selection_sentinel=$snapshot
+
+if ! command -v journalctl >/dev/null 2>&1; then
+    printf 'journql: journalctl was not found.\n' >&2
+    exit 127
+fi
+journalctl_command=journalctl
+
+collect_selection() {
+    if [ "$#" -eq 0 ]; then
+        usage_error 'a Journal Query needs a second -- separator.'
+    fi
+
+    if [ "$1" = '--' ]; then
+        shift
+        if [ "$#" -lt 2 ]; then
+            usage_error 'the command needs exactly one Journal Query argument after the second -- separator.'
+        fi
+        journal_query=$1
+        shift
+        if [ "$1" != "$selection_sentinel" ]; then
+            usage_error 'the command needs exactly one Journal Query argument after the second -- separator.'
+        fi
+        shift
+        "$journalctl_command" "$@" --output=json --all --no-pager >"$snapshot"
+        return $?
+    fi
+
+    if [ "$1" = "$selection_sentinel" ]; then
+        usage_error 'a Journal Query needs a second -- separator.'
+    fi
+
+    selection_argument=$1
     shift
-done
+    collect_selection "$@" "$selection_argument"
+}
 
-if [ "$#" -eq 0 ]; then
-    usage_error 'a Journal Query needs a second -- separator.'
+collect_selection "$@" "$selection_sentinel"
+journalctl_status=$?
+if [ "$journalctl_status" -ne 0 ]; then
+    exit "$journalctl_status"
 fi
 
-shift
-
-if [ "$#" -ne 1 ]; then
-    usage_error 'the command needs exactly one Journal Query argument after the second -- separator.'
+# The installed package keeps the required DuckDB version beside the command
+# under /usr/lib.
+command_directory=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+bundled_duckdb="$command_directory/../lib/journql/duckdb"
+if [ -x "$bundled_duckdb" ]; then
+    duckdb_command=$bundled_duckdb
+else
+    printf 'journql: bundled DuckDB 1.4.5 was not found.\n' >&2
+    exit 127
 fi
 
-# The Journal Selection and DuckDB execution are added by the next command
-# implementation issue. This issue establishes the public grammar first.
-exit 0
+# journalctl JSON field names are read from each complete object. The raw
+# object remains in entry so fields outside the stable relation stay intact.
+snapshot_sql_path=$(printf '%s' "$snapshot" | sed "s/'/''/g")
+bootstrap_sql=$(cat <<EOF
+SET TimeZone='UTC';
+CREATE TABLE journal AS
+SELECT
+  try_cast(to_timestamp(try_cast(json_extract_string(json, '\$.__REALTIME_TIMESTAMP') AS BIGINT) / 1000000.0) AS TIMESTAMPTZ) AS timestamp,
+  json_extract_string(json, '\$.MESSAGE') AS message,
+  json_extract_string(json, '\$._HOSTNAME') AS hostname,
+  json_extract_string(json, '\$._SYSTEMD_UNIT') AS systemd_unit,
+  json_extract_string(json, '\$._SYSTEMD_USER_UNIT') AS user_unit,
+  json_extract_string(json, '\$.SYSLOG_IDENTIFIER') AS identifier,
+  try_cast(json_extract_string(json, '\$.PRIORITY') AS INTEGER) AS priority,
+  try_cast(json_extract_string(json, '\$._PID') AS BIGINT) AS pid,
+  try_cast(json_extract_string(json, '\$._UID') AS BIGINT) AS uid,
+  try_cast(json_extract_string(json, '\$._GID') AS BIGINT) AS gid,
+  json_extract_string(json, '\$._BOOT_ID') AS boot_id,
+  json_extract_string(json, '\$._TRANSPORT') AS transport,
+  json_extract_string(json, '\$.__CURSOR') AS cursor,
+  json AS entry
+FROM read_json_objects('$snapshot_sql_path');
+EOF
+)
+
+printf '%s\n' "$journal_query" | "$duckdb_command" -table :memory: -cmd "$bootstrap_sql"

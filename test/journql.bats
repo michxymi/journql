@@ -5,20 +5,41 @@ load test_helper/bats-support/load
 load test_helper/bats-assert/load
 
 setup() {
-  command_path="$BATS_TEST_DIRNAME/../debian/usr/bin/journql"
+  command_source_path="$BATS_TEST_DIRNAME/../debian/usr/bin/journql"
+  fixture_path="$BATS_TEST_DIRNAME/fixtures/basic-journal.json"
   dependency_dir="$BATS_TEST_TMPDIR/dependencies"
+  command_path="$BATS_TEST_TMPDIR/usr/bin/journql"
+  bundled_dir="$BATS_TEST_TMPDIR/usr/lib/journql"
   dependency_marker="$BATS_TEST_TMPDIR/dependency-started"
-  mkdir -p "$dependency_dir"
+  journalctl_args="$BATS_TEST_TMPDIR/journalctl-args"
+  duckdb_args="$BATS_TEST_TMPDIR/duckdb-args"
+  duckdb_input="$BATS_TEST_TMPDIR/duckdb-input"
+  mkdir -p "$dependency_dir" "${command_path%/*}" "$bundled_dir"
+  cp "$command_source_path" "$command_path"
+  chmod 755 "$command_path"
 
-  for dependency in journalctl duckdb; do
-    dependency_path="$dependency_dir/$dependency"
-    printf '%s\n' \
-      '#!/bin/sh' \
-      "printf '%s\\n' '$dependency' >> '$dependency_marker'" \
-      'exit 97' >"$dependency_path"
-    chmod 755 "$dependency_path"
-  done
+  cat >"$dependency_dir/journalctl" <<'EOF'
+#!/bin/sh
+printf '%s\n' journalctl >>"$JOURNQL_TEST_DEPENDENCY_MARKER"
+printf '%s\n' "$@" >"$JOURNQL_TEST_JOURNALCTL_ARGS"
+cat "$JOURNQL_TEST_FIXTURE"
+EOF
+  chmod 755 "$dependency_dir/journalctl"
 
+  cat >"$bundled_dir/duckdb" <<'EOF'
+#!/bin/sh
+printf '%s\n' duckdb >>"$JOURNQL_TEST_DEPENDENCY_MARKER"
+printf '%s\n' "$@" >"$JOURNQL_TEST_DUCKDB_ARGS"
+cat >"$JOURNQL_TEST_DUCKDB_INPUT"
+printf '%s\n' 1
+EOF
+  chmod 755 "$bundled_dir/duckdb"
+
+  export JOURNQL_TEST_DEPENDENCY_MARKER="$dependency_marker"
+  export JOURNQL_TEST_FIXTURE="$fixture_path"
+  export JOURNQL_TEST_JOURNALCTL_ARGS="$journalctl_args"
+  export JOURNQL_TEST_DUCKDB_ARGS="$duckdb_args"
+  export JOURNQL_TEST_DUCKDB_INPUT="$duckdb_input"
   export PATH="$dependency_dir:$PATH"
 }
 
@@ -65,6 +86,7 @@ setup() {
 
   assert_success || return 1
   assert_stderr ''
+  assert_output '1'
 }
 
 @test "a valid Journal Selection stays between the separators" {
@@ -72,6 +94,30 @@ setup() {
 
   assert_success || return 1
   assert_stderr ''
+  assert_equal "$(cat "$JOURNQL_TEST_JOURNALCTL_ARGS")" $'--unit\nsshd.service\n--output=json\n--all\n--no-pager'
+}
+
+@test "a basic Journal Query uses the complete fixture and stable relation" {
+  export TMPDIR="$BATS_TEST_TMPDIR"
+
+  run --separate-stderr "$command_path" -- -- 'SELECT timestamp, message, entry FROM journal;'
+
+  assert_success || return 1
+  assert_stderr '' || return 1
+  assert_output '1' || return 1
+  assert_equal "$(cat "$JOURNQL_TEST_JOURNALCTL_ARGS")" $'--output=json\n--all\n--no-pager' || return 1
+  assert_equal "$(cat "$JOURNQL_TEST_DEPENDENCY_MARKER")" $'journalctl\nduckdb' || return 1
+  assert_equal "$(cat "$JOURNQL_TEST_DUCKDB_INPUT")" 'SELECT timestamp, message, entry FROM journal;' || return 1
+
+  grep -F -- '-table' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  grep -F -- ':memory:' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  grep -F -- "SET TimeZone='UTC';" "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  grep -F -- 'CREATE TABLE journal AS' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  grep -F -- 'read_json_objects' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  for column in timestamp message hostname systemd_unit user_unit identifier priority pid uid gid boot_id transport cursor entry; do
+    grep -F -- "$column" "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  done
+  [[ -z "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'journql.*' -print -quit)" ]]
 }
 
 @test "format options accept separate and equals-value forms" {
