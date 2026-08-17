@@ -1,3 +1,204 @@
 #!/bin/sh
 # Copyright 2026 Michael Xymitoulias
 # SPDX-License-Identifier: Apache-2.0
+
+JOURNQL_VERSION=0.1.0
+DUCKDB_VERSION=1.4.5
+
+usage_error() {
+    printf 'journql: %s\n' "$1" >&2
+    printf '%s\n' "journql: use 'journql --help' for help." >&2
+    exit 2
+}
+
+print_version() {
+    printf 'journql %s\n' "${JOURNQL_VERSION}"
+    printf 'DuckDB %s\n' "${DUCKDB_VERSION}"
+}
+
+print_help() {
+    cat <<'EOF'
+Usage: journql [OPTIONS] -- [JOURNAL SELECTION] -- 'JOURNAL QUERY'
+
+The command needs two -- separators. The first separator ends journql options.
+The second separator ends the Journal Selection. The Journal Query is exactly
+one shell argument after the second separator.
+
+Options:
+  --help                  Show this help and exit. Use this option alone.
+  --version               Show journql and DuckDB versions and exit. Use this
+                          option alone.
+  --format FORMAT         Select the Query Result format.
+                          FORMAT is table (default), csv, or json. The
+                          --format=FORMAT form is also supported. Use this
+                          option at most once.
+
+Journal Selection controls:
+  --system, --user, --merge
+                          Select system, user, or merged Journal Entries.
+  --since, --until, --cursor, --after-cursor, --boot
+                          Select a time, cursor position, or boot position.
+  --unit, --user-unit, --identifier, --priority, --facility
+                          Select by unit, user unit, identifier, priority, or
+                          facility.
+  --grep, --ignore-case, --dmesg
+                          Select by text pattern, case handling, or kernel
+                          source.
+  --lines and --reverse  Limit the Journal Selection and reverse its order.
+  FIELD=VALUE and +      Use native field matches and the journal disjunction
+                          operator. Path matches are not supported.
+
+Documented short forms and separate-value forms for these journalctl
+selection controls are allowed. journql keeps control of the output format,
+complete field values, and pager behavior.
+Short forms include -m, -b, -u, -t, -p, -g, -i, -k, -n, and -r. A value can
+use a separate argument or the documented --option=value form.
+
+The default Journal Selection is the normal journalctl selection. journql does
+not add a time or size limit. It runs with the current user's authority. Add
+the user to the systemd-journal group when the installed package requires it.
+
+journql stores the Journal Selection in a private temporary file under the
+configured temporary directory, or the standard temporary directory when it
+is not configured. It writes newline-delimited JSON and removes the file after
+use. A large Journal Selection can use temporary disk space equal to its JSON
+size.
+Select fewer Journal Entries when necessary.
+
+The journal relation has these stable columns:
+  timestamp TIMESTAMPTZ
+  message VARCHAR
+  hostname VARCHAR
+  systemd_unit VARCHAR
+  user_unit VARCHAR
+  identifier VARCHAR
+  priority INTEGER
+  pid BIGINT
+  uid BIGINT
+  gid BIGINT
+  boot_id VARCHAR
+  transport VARCHAR
+  cursor VARCHAR
+  entry JSON
+The entry column preserves the complete Journal Entry, including fields that
+are not in the stable column list.
+
+Examples:
+  journql -- -- 'SELECT count(*) FROM journal;'
+  journql --format csv -- --unit sshd.service -- \
+    'SELECT timestamp, message FROM journal;'
+EOF
+}
+
+if [ "$#" -eq 1 ]; then
+    case "$1" in
+        --help)
+            print_help
+            exit 0
+            ;;
+        --version)
+            print_version
+            exit 0
+            ;;
+        *)
+            ;;
+    esac
+fi
+
+format_seen=0
+help_seen=0
+version_seen=0
+first_separator_found=0
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --)
+            first_separator_found=1
+            shift
+            break
+            ;;
+        --help)
+            if [ "${help_seen}" -eq 1 ]; then
+                usage_error 'option --help can be used only once.'
+            fi
+            help_seen=1
+            shift
+            ;;
+        --version)
+            if [ "${version_seen}" -eq 1 ]; then
+                usage_error 'option --version can be used only once.'
+            fi
+            version_seen=1
+            shift
+            ;;
+        --format)
+            if [ "${format_seen}" -eq 1 ]; then
+                usage_error 'option --format can be used only once.'
+            fi
+            if [ "$#" -lt 2 ] || [ "$2" = '--' ]; then
+                usage_error 'option --format needs a value.'
+            fi
+            format_value=$2
+            format_seen=1
+            shift 2
+            ;;
+        --format=*)
+            if [ "${format_seen}" -eq 1 ]; then
+                usage_error 'option --format can be used only once.'
+            fi
+            format_value=${1#--format=}
+            format_seen=1
+            shift
+            ;;
+        --*)
+            usage_error "unknown option: $1"
+            ;;
+        *)
+            usage_error "expected a journql option or the first -- separator, got: $1"
+            ;;
+    esac
+done
+
+if [ "${help_seen}" -eq 1 ] && [ "${version_seen}" -eq 1 ]; then
+    usage_error '--help and --version cannot be used together.'
+fi
+
+if [ "${help_seen}" -eq 1 ]; then
+    usage_error 'option --help must be used alone.'
+fi
+
+if [ "${version_seen}" -eq 1 ]; then
+    usage_error 'option --version must be used alone.'
+fi
+
+if [ "${format_seen}" -eq 1 ]; then
+    case "${format_value}" in
+        table|csv|json)
+            ;;
+        *)
+            usage_error "invalid format: ${format_value}"
+            ;;
+    esac
+fi
+
+if [ "${first_separator_found}" -eq 0 ]; then
+    usage_error 'a Journal Query needs two -- separators.'
+fi
+
+while [ "$#" -gt 0 ] && [ "$1" != '--' ]; do
+    shift
+done
+
+if [ "$#" -eq 0 ]; then
+    usage_error 'a Journal Query needs a second -- separator.'
+fi
+
+shift
+
+if [ "$#" -ne 1 ]; then
+    usage_error 'the command needs exactly one Journal Query argument after the second -- separator.'
+fi
+
+# The Journal Selection and DuckDB execution are added by the next command
+# implementation issue. This issue establishes the public grammar first.
+exit 0
