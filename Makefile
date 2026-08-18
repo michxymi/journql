@@ -7,6 +7,8 @@ DUCKDB_VER := 1.4.5
 DUCKDB_URL := https://github.com/duckdb/duckdb/releases/download/v$(DUCKDB_VER)/duckdb_cli-linux-$(ARCH).zip
 PACKAGE_VERSION := $(VERSION)+duckdb$(DUCKDB_VER)
 CHANGELOG_FILE  := debian/changelog
+UBUNTU_IMAGE ?= ubuntu:24.04
+DOCKER       ?= docker
 
 ifeq ($(ARCH), amd64)
 	DUCKDB_SHA256 := ff4ef9ec59fe3e1a1f3dd1004c6218d1fd59c0533c185c968c4403fd0240d02b
@@ -19,7 +21,7 @@ endif
 BUILD_DIR  := build/$(NAME)_$(VERSION)_$(ARCH)
 DEB_FILE   := build/$(NAME)_$(VERSION)_$(ARCH).deb
 
-.PHONY: all clean deb fetch-duckdb stage lint pre-commit changelog test
+.PHONY: all clean deb fetch-duckdb stage lint pre-commit changelog test verify-package verify-release verify-release-docker
 
 all: deb
 
@@ -84,6 +86,33 @@ pre-commit:
 
 test:
 	test/bats/bin/bats test/journql.bats
+
+verify-package: deb
+	test/release.sh "$(DEB_FILE)" "$(ARCH)"
+
+verify-release: test
+	$(MAKE) verify-package ARCH=amd64
+	$(MAKE) verify-package ARCH=arm64
+	$(MAKE) lint ARCH=amd64
+	$(MAKE) lint ARCH=arm64
+	if command -v dpkg >/dev/null 2>&1; then \
+		native_arch=$$(dpkg --print-architecture); \
+		case "$$native_arch" in \
+			amd64|arm64) \
+				test/release.sh "build/$(NAME)_$(VERSION)_$${native_arch}.deb" \
+					"$$native_arch" --run-installed test/fixtures/basic-journal.json; \
+				;; \
+		esac; \
+	fi
+
+verify-release-docker:
+	$(DOCKER) run --rm -v "$(CURDIR):/repo" -w /repo "$(UBUNTU_IMAGE)" \
+		bash -lc 'set -eu; \
+		apt-get update -qq; \
+		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+			make unzip binutils binutils-x86-64-linux-gnu \
+			binutils-aarch64-linux-gnu file ca-certificates curl lintian systemd; \
+		make verify-release'
 
 lint: deb
 	lintian $(BUILD_DIR).deb
