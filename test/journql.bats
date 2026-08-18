@@ -15,6 +15,7 @@ setup() {
   journalctl_args="$BATS_TEST_TMPDIR/journalctl-args"
   duckdb_args="$BATS_TEST_TMPDIR/duckdb-args"
   duckdb_input="$BATS_TEST_TMPDIR/duckdb-input"
+  background_command_pid=''
   mkdir -p "$dependency_dir" "${command_path%/*}" "$bundled_dir"
   cp "$command_source_path" "$command_path"
   chmod 755 "$command_path"
@@ -25,6 +26,17 @@ printf '%s\n' journalctl >>"$JOURNQL_TEST_DEPENDENCY_MARKER"
 printf '%s\n' "$@" >"$JOURNQL_TEST_JOURNALCTL_ARGS"
 if [ -n "${JOURNQL_TEST_JOURNALCTL_DIAGNOSTIC:-}" ]; then
   printf '%s\n' "$JOURNQL_TEST_JOURNALCTL_DIAGNOSTIC" >&2
+fi
+if [ -n "${JOURNQL_TEST_JOURNALCTL_READY_FILE:-}" ] &&
+  [ -n "${JOURNQL_TEST_JOURNALCTL_RELEASE_FILE:-}" ]; then
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  printf '%s\n' "$$" >"$JOURNQL_TEST_JOURNALCTL_PID_FILE"
+  : >"$JOURNQL_TEST_JOURNALCTL_READY_FILE"
+  while [ ! -e "$JOURNQL_TEST_JOURNALCTL_RELEASE_FILE" ]; do
+    sleep 0.01
+  done
 fi
 cat "$JOURNQL_TEST_FIXTURE"
 if [ -n "${JOURNQL_TEST_JOURNALCTL_STATUS:-}" ]; then
@@ -40,6 +52,13 @@ printf '%s\n' "$@" >"$JOURNQL_TEST_DUCKDB_ARGS"
 cat >"$JOURNQL_TEST_DUCKDB_INPUT"
 if [ -n "${JOURNQL_TEST_DUCKDB_DIAGNOSTIC:-}" ]; then
   printf '%s\n' "$JOURNQL_TEST_DUCKDB_DIAGNOSTIC" >&2
+fi
+if [ -n "${JOURNQL_TEST_DUCKDB_READY_FILE:-}" ] &&
+  [ -n "${JOURNQL_TEST_DUCKDB_RELEASE_FILE:-}" ]; then
+  : >"$JOURNQL_TEST_DUCKDB_READY_FILE"
+  while [ ! -e "$JOURNQL_TEST_DUCKDB_RELEASE_FILE" ]; do
+    sleep 0.01
+  done
 fi
 if [ -n "${JOURNQL_TEST_DUCKDB_STATUS:-}" ]; then
   exit "$JOURNQL_TEST_DUCKDB_STATUS"
@@ -69,7 +88,23 @@ EOF
   export JOURNQL_TEST_DUCKDB_INPUT="$duckdb_input"
   unset JOURNQL_TEST_JOURNALCTL_DIAGNOSTIC JOURNQL_TEST_JOURNALCTL_STATUS
   unset JOURNQL_TEST_DUCKDB_DIAGNOSTIC JOURNQL_TEST_DUCKDB_STATUS
+  unset JOURNQL_TEST_JOURNALCTL_READY_FILE JOURNQL_TEST_JOURNALCTL_RELEASE_FILE
+  unset JOURNQL_TEST_JOURNALCTL_PID_FILE
+  unset JOURNQL_TEST_DUCKDB_READY_FILE JOURNQL_TEST_DUCKDB_RELEASE_FILE
   export PATH="$dependency_dir:$PATH"
+}
+
+teardown() {
+  if [[ -n "${JOURNQL_TEST_DUCKDB_RELEASE_FILE:-}" ]]; then
+    : >"$JOURNQL_TEST_DUCKDB_RELEASE_FILE"
+  fi
+  if [[ -n "${JOURNQL_TEST_JOURNALCTL_RELEASE_FILE:-}" ]]; then
+    : >"$JOURNQL_TEST_JOURNALCTL_RELEASE_FILE"
+  fi
+  if [[ -n "${background_command_pid:-}" ]]; then
+    kill "$background_command_pid" 2>/dev/null || :
+    wait "$background_command_pid" 2>/dev/null || :
+  fi
 }
 
 @test "--help describes the command contract without reading the journal" {
@@ -149,6 +184,74 @@ EOF
   [[ -z "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'journql.*' -print -quit)" ]]
 }
 
+@test "a configured temporary directory stores a private unpredictable snapshot" {
+  local temporary_directory snapshot_path snapshot_mode command_status
+  temporary_directory="$BATS_TEST_TMPDIR/configured-tmp"
+  mkdir -p "$temporary_directory"
+  export TMPDIR="$temporary_directory"
+  export JOURNQL_TEST_DUCKDB_READY_FILE="$BATS_TEST_TMPDIR/duckdb-ready"
+  export JOURNQL_TEST_DUCKDB_RELEASE_FILE="$BATS_TEST_TMPDIR/duckdb-release"
+
+  "$command_path" -- -- 'SELECT 1' >"$BATS_TEST_TMPDIR/query-output" 2>"$BATS_TEST_TMPDIR/query-error" &
+  background_command_pid=$!
+  while [[ ! -e "$JOURNQL_TEST_DUCKDB_READY_FILE" ]]; do
+    kill -0 "$background_command_pid" 2>/dev/null || break
+    sleep 0.01
+  done
+
+  snapshot_path=$(find "$temporary_directory" -maxdepth 1 -type f -name 'journql.*' -print -quit)
+  [[ -n "$snapshot_path" ]]
+  case "$snapshot_path" in
+    "$temporary_directory"/journql.??????????)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  if [[ "$(uname -s)" = Darwin ]]; then
+    snapshot_mode=$(stat -f '%Lp' "$snapshot_path")
+  else
+    snapshot_mode=$(stat -c '%a' "$snapshot_path")
+  fi
+  assert_equal "$snapshot_mode" 600 || return 1
+
+  : >"$JOURNQL_TEST_DUCKDB_RELEASE_FILE"
+  if wait "$background_command_pid"; then
+    command_status=0
+  else
+    command_status=$?
+  fi
+  background_command_pid=''
+  assert_equal "$command_status" 0 || return 1
+  [[ ! -e "$snapshot_path" ]]
+}
+
+@test "an empty TMPDIR uses the standard temporary directory" {
+  local snapshot_path command_status
+  unset TMPDIR
+  export JOURNQL_TEST_DUCKDB_READY_FILE="$BATS_TEST_TMPDIR/duckdb-ready"
+  export JOURNQL_TEST_DUCKDB_RELEASE_FILE="$BATS_TEST_TMPDIR/duckdb-release"
+
+  "$command_path" -- -- 'SELECT 1' >"$BATS_TEST_TMPDIR/query-output" 2>"$BATS_TEST_TMPDIR/query-error" &
+  background_command_pid=$!
+  while [[ ! -e "$JOURNQL_TEST_DUCKDB_READY_FILE" ]]; do
+    kill -0 "$background_command_pid" 2>/dev/null || break
+    sleep 0.01
+  done
+
+  snapshot_path=$(find /tmp -maxdepth 1 -type f -name 'journql.*' -print -quit)
+  [[ -n "$snapshot_path" ]]
+  : >"$JOURNQL_TEST_DUCKDB_RELEASE_FILE"
+  if wait "$background_command_pid"; then
+    command_status=0
+  else
+    command_status=$?
+  fi
+  background_command_pid=''
+  assert_equal "$command_status" 0 || return 1
+  [[ ! -e "$snapshot_path" ]]
+}
+
 @test "a successful Journal Query keeps diagnostics on stderr" {
   export JOURNQL_TEST_JOURNALCTL_DIAGNOSTIC='journalctl warning'
   export JOURNQL_TEST_DUCKDB_DIAGNOSTIC='duckdb diagnostic'
@@ -161,6 +264,7 @@ EOF
 }
 
 @test "a Journal Selection failure returns its status and does not start DuckDB" {
+  export TMPDIR="$BATS_TEST_TMPDIR"
   export JOURNQL_TEST_JOURNALCTL_DIAGNOSTIC='journalctl failure'
   export JOURNQL_TEST_JOURNALCTL_STATUS=17
 
@@ -171,9 +275,11 @@ EOF
   assert_stderr 'journalctl failure' || return 1
   assert_equal "$(cat "$JOURNQL_TEST_DEPENDENCY_MARKER")" 'journalctl' || return 1
   [[ ! -e "$JOURNQL_TEST_DUCKDB_INPUT" ]]
+  [[ -z "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'journql.*' -print -quit)" ]]
 }
 
 @test "a DuckDB failure returns the DuckDB status and keeps its diagnostic on stderr" {
+  export TMPDIR="$BATS_TEST_TMPDIR"
   export JOURNQL_TEST_DUCKDB_DIAGNOSTIC='duckdb failure'
   export JOURNQL_TEST_DUCKDB_STATUS=23
 
@@ -183,6 +289,36 @@ EOF
   assert_output '' || return 1
   assert_stderr 'duckdb failure' || return 1
   assert_equal "$(cat "$JOURNQL_TEST_DEPENDENCY_MARKER")" $'journalctl\nduckdb' || return 1
+  [[ -z "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'journql.*' -print -quit)" ]]
+}
+
+@test "the snapshot is removed after HUP, INT, and TERM" {
+  local signal snapshot_path journalctl_pid
+  for signal in HUP INT TERM; do
+    export TMPDIR="$BATS_TEST_TMPDIR/$signal"
+    mkdir -p "$TMPDIR"
+    export JOURNQL_TEST_JOURNALCTL_READY_FILE="$BATS_TEST_TMPDIR/$signal-journalctl-ready"
+    export JOURNQL_TEST_JOURNALCTL_RELEASE_FILE="$BATS_TEST_TMPDIR/$signal-journalctl-release"
+    export JOURNQL_TEST_JOURNALCTL_PID_FILE="$BATS_TEST_TMPDIR/$signal-journalctl-pid"
+
+    (trap - HUP INT TERM; exec "$command_path" -- -- 'SELECT 1') \
+      >"$BATS_TEST_TMPDIR/$signal-output" 2>"$BATS_TEST_TMPDIR/$signal-error" &
+    background_command_pid=$!
+    while [[ ! -e "$JOURNQL_TEST_JOURNALCTL_READY_FILE" ]]; do
+      kill -0 "$background_command_pid" 2>/dev/null || break
+      sleep 0.01
+    done
+    snapshot_path=$(find "$TMPDIR" -maxdepth 1 -type f -name 'journql.*' -print -quit)
+    [[ -n "$snapshot_path" ]]
+
+    journalctl_pid=$(cat "$JOURNQL_TEST_JOURNALCTL_PID_FILE")
+    kill -"$signal" "$background_command_pid" 2>/dev/null || :
+    kill -"$signal" "$journalctl_pid" 2>/dev/null || :
+    : >"$JOURNQL_TEST_JOURNALCTL_RELEASE_FILE"
+    wait "$background_command_pid" || :
+    background_command_pid=''
+    [[ ! -e "$snapshot_path" ]]
+  done
 }
 
 @test "missing Journal Entry fields keep the stable relation and entry JSON" {

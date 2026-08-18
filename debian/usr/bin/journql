@@ -192,6 +192,7 @@ if [ "${first_separator_found}" -eq 0 ]; then
 fi
 
 temporary_directory=${TMPDIR:-/tmp}
+umask 077
 snapshot=$(mktemp "$temporary_directory/journql.XXXXXXXXXX") || {
     printf 'journql: cannot create a private Journal Selection snapshot.\n' >&2
     exit 1
