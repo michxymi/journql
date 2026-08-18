@@ -57,7 +57,9 @@ selection controls are allowed. journql keeps control of the output format,
 complete field values, and pager behavior.
 Short forms include -m, -b, -u, -t, -p, -g, -i, -k, -n, and -r.
 Time and cursor short forms are -S, -U, and -c.
-A value can use a separate argument or the documented --option=value form.
+Options that need a value accept a separate argument. The documented
+--option=value form is also supported where applicable. Optional values can
+be omitted for --boot, --lines, and --case-sensitive.
 
 The default Journal Selection is the normal journalctl selection. journql does
 not add a time or size limit. It runs with the current user's authority. Add
@@ -67,8 +69,15 @@ journql stores the Journal Selection in a private temporary file under the
 configured temporary directory, or the standard temporary directory when it
 is not configured. It writes newline-delimited JSON and removes the file after
 use. A large Journal Selection can use temporary disk space equal to its JSON
-size.
-Select fewer Journal Entries when necessary.
+size. Select fewer Journal Entries when necessary.
+
+Missing, repeated, binary, or invalid stable source values become NULL. The
+complete original Journal Entry remains available in the entry JSON column.
+Version 0.1.0 does not set a maximum number of Journal Entries, Journal
+Selection size, or Journal Query size. Practical limits come from journalctl,
+the temporary file system, available memory, DuckDB, and the operating system.
+The release is read-only and does not support remote journals, journal
+maintenance, interactive paging, or follow mode.
 
 The journal relation has these stable columns:
   timestamp TIMESTAMPTZ

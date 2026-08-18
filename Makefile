@@ -51,6 +51,7 @@ stage: fetch-duckdb
 	gzip -n -9 $(BUILD_DIR)/usr/share/doc/$(NAME)/changelog
 	install -m 644 LICENSE $(BUILD_DIR)/usr/share/doc/$(NAME)/LICENSE
 	install -m 644 NOTICE $(BUILD_DIR)/usr/share/doc/$(NAME)/NOTICE
+	install -m 644 README.md $(BUILD_DIR)/usr/share/doc/$(NAME)/README.md
 
 	# DuckDB binary
 	unzip -o build/cache/duckdb-$(DUCKDB_VER)-$(ARCH).zip -d $(BUILD_DIR)/usr/lib/$(NAME)/

@@ -131,6 +131,8 @@ teardown() {
   assert_output --partial 'current user' || return 1
   assert_output --partial 'private temporary file' || return 1
   assert_output --partial 'Select fewer Journal Entries' || return 1
+  assert_output --partial 'Missing, repeated, binary, or invalid stable source values become NULL.' || return 1
+  assert_output --partial 'does not set a maximum number of Journal Entries' || return 1
   assert_output --partial "journql -- -- 'SELECT count(*) FROM journal;'" || return 1
   [[ ! -e "$dependency_marker" ]]
 }
