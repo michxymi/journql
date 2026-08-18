@@ -31,7 +31,21 @@ EOF
 printf '%s\n' duckdb >>"$JOURNQL_TEST_DEPENDENCY_MARKER"
 printf '%s\n' "$@" >"$JOURNQL_TEST_DUCKDB_ARGS"
 cat >"$JOURNQL_TEST_DUCKDB_INPUT"
-printf '%s\n' 1
+case "$(cat "$JOURNQL_TEST_DUCKDB_INPUT")" in
+  'SELECT entry FROM journal;')
+    cat "$JOURNQL_TEST_FIXTURE"
+    ;;
+  'SELECT count(*) FROM journal;')
+    if [ -s "$JOURNQL_TEST_FIXTURE" ]; then
+      printf '%s\n' 1
+    else
+      printf '%s\n' 0
+    fi
+    ;;
+  *)
+    printf '%s\n' 1
+    ;;
+esac
 EOF
   chmod 755 "$bundled_dir/duckdb"
 
@@ -112,12 +126,72 @@ EOF
   grep -F -- '-table' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
   grep -F -- ':memory:' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
   grep -F -- "SET TimeZone='UTC';" "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
-  grep -F -- 'CREATE TABLE journal AS' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  grep -F -- 'CREATE TABLE journal (' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
   grep -F -- 'read_json_objects' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
   for column in timestamp message hostname systemd_unit user_unit identifier priority pid uid gid boot_id transport cursor entry; do
     grep -F -- "$column" "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
   done
   [[ -z "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'journql.*' -print -quit)" ]]
+}
+
+@test "missing Journal Entry fields keep the stable relation and entry JSON" {
+  JOURNQL_TEST_FIXTURE="$BATS_TEST_DIRNAME/fixtures/missing-journal-fields.json"
+
+  run --separate-stderr "$command_path" -- -- 'SELECT entry FROM journal;'
+
+  assert_success || return 1
+  assert_stderr '' || return 1
+  assert_output --partial 'preserved-missing' || return 1
+  for column_definition in \
+    'timestamp TIMESTAMPTZ' 'message VARCHAR' 'hostname VARCHAR' \
+    'systemd_unit VARCHAR' 'user_unit VARCHAR' 'identifier VARCHAR' \
+    'priority INTEGER' 'pid BIGINT' 'uid BIGINT' 'gid BIGINT' \
+    'boot_id VARCHAR' 'transport VARCHAR' 'cursor VARCHAR' 'entry JSON'; do
+    grep -F -- "$column_definition" "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  done
+  grep -F -- 'INSERT INTO journal' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  grep -F -- 'APP_DEFINED' "$JOURNQL_TEST_FIXTURE" >/dev/null || return 1
+}
+
+@test "repeated and binary stable source values become NULL-compatible" {
+  local fixture
+  for fixture in repeated-journal-fields.json binary-journal-fields.json; do
+    JOURNQL_TEST_FIXTURE="$BATS_TEST_DIRNAME/fixtures/$fixture"
+
+    run --separate-stderr "$command_path" -- -- 'SELECT count(*) FROM journal;'
+
+    assert_success || return 1
+    assert_stderr '' || return 1
+    assert_output '1' || return 1
+    grep -F -- "json_type(json" "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+    grep -F -- "= 'VARCHAR'" "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  done
+}
+
+@test "invalid timestamp and numeric source values do not stop the Journal Query" {
+  JOURNQL_TEST_FIXTURE="$BATS_TEST_DIRNAME/fixtures/invalid-journal-fields.json"
+
+  run --separate-stderr "$command_path" -- -- 'SELECT timestamp, priority, pid, uid, gid, entry FROM journal;'
+
+  assert_success || return 1
+  assert_stderr '' || return 1
+  assert_output '1' || return 1
+  grep -F -- 'try_cast' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  grep -F -- 'try(to_timestamp' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  grep -F -- 'CASE' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  grep -F -- 'APP_DEFINED' "$JOURNQL_TEST_FIXTURE" >/dev/null || return 1
+}
+
+@test "an empty Journal Selection creates the stable relation" {
+  JOURNQL_TEST_FIXTURE="$BATS_TEST_DIRNAME/fixtures/empty-journal.json"
+
+  run --separate-stderr "$command_path" -- -- 'SELECT count(*) FROM journal;'
+
+  assert_success || return 1
+  assert_stderr '' || return 1
+  assert_output '0' || return 1
+  grep -F -- 'CREATE TABLE journal' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
+  grep -F -- 'INSERT INTO journal' "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
 }
 
 @test "the default and selected formats use the matching DuckDB formatter" {

@@ -438,21 +438,55 @@ fi
 snapshot_sql_path=$(printf '%s' "$snapshot" | sed "s/'/''/g")
 bootstrap_sql=$(cat <<EOF
 SET TimeZone='UTC';
-CREATE TABLE journal AS
+CREATE TABLE journal (
+  timestamp TIMESTAMPTZ,
+  message VARCHAR,
+  hostname VARCHAR,
+  systemd_unit VARCHAR,
+  user_unit VARCHAR,
+  identifier VARCHAR,
+  priority INTEGER,
+  pid BIGINT,
+  uid BIGINT,
+  gid BIGINT,
+  boot_id VARCHAR,
+  transport VARCHAR,
+  cursor VARCHAR,
+  entry JSON
+);
+INSERT INTO journal
 SELECT
-  try_cast(to_timestamp(try_cast(json_extract_string(json, '\$.__REALTIME_TIMESTAMP') AS BIGINT) / 1000000.0) AS TIMESTAMPTZ) AS timestamp,
-  json_extract_string(json, '\$.MESSAGE') AS message,
-  json_extract_string(json, '\$._HOSTNAME') AS hostname,
-  json_extract_string(json, '\$._SYSTEMD_UNIT') AS systemd_unit,
-  json_extract_string(json, '\$._SYSTEMD_USER_UNIT') AS user_unit,
-  json_extract_string(json, '\$.SYSLOG_IDENTIFIER') AS identifier,
-  try_cast(json_extract_string(json, '\$.PRIORITY') AS INTEGER) AS priority,
-  try_cast(json_extract_string(json, '\$._PID') AS BIGINT) AS pid,
-  try_cast(json_extract_string(json, '\$._UID') AS BIGINT) AS uid,
-  try_cast(json_extract_string(json, '\$._GID') AS BIGINT) AS gid,
-  json_extract_string(json, '\$._BOOT_ID') AS boot_id,
-  json_extract_string(json, '\$._TRANSPORT') AS transport,
-  json_extract_string(json, '\$.__CURSOR') AS cursor,
+  CASE
+    WHEN json_type(json, '\$.__REALTIME_TIMESTAMP') = 'VARCHAR' THEN
+      try(to_timestamp(
+        try_cast(json_extract_string(json, '\$.__REALTIME_TIMESTAMP') AS BIGINT) / 1000000.0
+      ))
+    ELSE NULL
+  END AS timestamp,
+  CASE WHEN json_type(json, '\$.MESSAGE') = 'VARCHAR'
+    THEN json_extract_string(json, '\$.MESSAGE') ELSE NULL END AS message,
+  CASE WHEN json_type(json, '\$._HOSTNAME') = 'VARCHAR'
+    THEN json_extract_string(json, '\$._HOSTNAME') ELSE NULL END AS hostname,
+  CASE WHEN json_type(json, '\$._SYSTEMD_UNIT') = 'VARCHAR'
+    THEN json_extract_string(json, '\$._SYSTEMD_UNIT') ELSE NULL END AS systemd_unit,
+  CASE WHEN json_type(json, '\$._SYSTEMD_USER_UNIT') = 'VARCHAR'
+    THEN json_extract_string(json, '\$._SYSTEMD_USER_UNIT') ELSE NULL END AS user_unit,
+  CASE WHEN json_type(json, '\$.SYSLOG_IDENTIFIER') = 'VARCHAR'
+    THEN json_extract_string(json, '\$.SYSLOG_IDENTIFIER') ELSE NULL END AS identifier,
+  CASE WHEN json_type(json, '\$.PRIORITY') = 'VARCHAR'
+    THEN try_cast(json_extract_string(json, '\$.PRIORITY') AS INTEGER) ELSE NULL END AS priority,
+  CASE WHEN json_type(json, '\$._PID') = 'VARCHAR'
+    THEN try_cast(json_extract_string(json, '\$._PID') AS BIGINT) ELSE NULL END AS pid,
+  CASE WHEN json_type(json, '\$._UID') = 'VARCHAR'
+    THEN try_cast(json_extract_string(json, '\$._UID') AS BIGINT) ELSE NULL END AS uid,
+  CASE WHEN json_type(json, '\$._GID') = 'VARCHAR'
+    THEN try_cast(json_extract_string(json, '\$._GID') AS BIGINT) ELSE NULL END AS gid,
+  CASE WHEN json_type(json, '\$._BOOT_ID') = 'VARCHAR'
+    THEN json_extract_string(json, '\$._BOOT_ID') ELSE NULL END AS boot_id,
+  CASE WHEN json_type(json, '\$._TRANSPORT') = 'VARCHAR'
+    THEN json_extract_string(json, '\$._TRANSPORT') ELSE NULL END AS transport,
+  CASE WHEN json_type(json, '\$.__CURSOR') = 'VARCHAR'
+    THEN json_extract_string(json, '\$.__CURSOR') ELSE NULL END AS cursor,
   json AS entry
 FROM read_json_objects('$snapshot_sql_path');
 EOF
