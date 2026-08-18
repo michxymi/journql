@@ -197,6 +197,7 @@ snapshot=$(mktemp "$temporary_directory/journql.XXXXXXXXXX") || {
     exit 1
 }
 
+# shellcheck disable=SC2329  # Called indirectly by the EXIT trap.
 cleanup_snapshot() {
     rm -f -- "$snapshot"
 }
@@ -493,3 +494,5 @@ EOF
 )
 
 printf '%s\n' "$journal_query" | "$duckdb_command" "-${format_value}" :memory: -cmd "$bootstrap_sql"
+duckdb_status=$?
+exit "$duckdb_status"

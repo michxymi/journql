@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2030,SC2031  # Bats runs each test in a subshell.
 
 bats_require_minimum_version 1.5.0
 load test_helper/bats-support/load
@@ -22,7 +23,13 @@ setup() {
 #!/bin/sh
 printf '%s\n' journalctl >>"$JOURNQL_TEST_DEPENDENCY_MARKER"
 printf '%s\n' "$@" >"$JOURNQL_TEST_JOURNALCTL_ARGS"
+if [ -n "${JOURNQL_TEST_JOURNALCTL_DIAGNOSTIC:-}" ]; then
+  printf '%s\n' "$JOURNQL_TEST_JOURNALCTL_DIAGNOSTIC" >&2
+fi
 cat "$JOURNQL_TEST_FIXTURE"
+if [ -n "${JOURNQL_TEST_JOURNALCTL_STATUS:-}" ]; then
+  exit "$JOURNQL_TEST_JOURNALCTL_STATUS"
+fi
 EOF
   chmod 755 "$dependency_dir/journalctl"
 
@@ -31,6 +38,12 @@ EOF
 printf '%s\n' duckdb >>"$JOURNQL_TEST_DEPENDENCY_MARKER"
 printf '%s\n' "$@" >"$JOURNQL_TEST_DUCKDB_ARGS"
 cat >"$JOURNQL_TEST_DUCKDB_INPUT"
+if [ -n "${JOURNQL_TEST_DUCKDB_DIAGNOSTIC:-}" ]; then
+  printf '%s\n' "$JOURNQL_TEST_DUCKDB_DIAGNOSTIC" >&2
+fi
+if [ -n "${JOURNQL_TEST_DUCKDB_STATUS:-}" ]; then
+  exit "$JOURNQL_TEST_DUCKDB_STATUS"
+fi
 case "$(cat "$JOURNQL_TEST_DUCKDB_INPUT")" in
   'SELECT entry FROM journal;')
     cat "$JOURNQL_TEST_FIXTURE"
@@ -54,6 +67,8 @@ EOF
   export JOURNQL_TEST_JOURNALCTL_ARGS="$journalctl_args"
   export JOURNQL_TEST_DUCKDB_ARGS="$duckdb_args"
   export JOURNQL_TEST_DUCKDB_INPUT="$duckdb_input"
+  unset JOURNQL_TEST_JOURNALCTL_DIAGNOSTIC JOURNQL_TEST_JOURNALCTL_STATUS
+  unset JOURNQL_TEST_DUCKDB_DIAGNOSTIC JOURNQL_TEST_DUCKDB_STATUS
   export PATH="$dependency_dir:$PATH"
 }
 
@@ -132,6 +147,42 @@ EOF
     grep -F -- "$column" "$JOURNQL_TEST_DUCKDB_ARGS" >/dev/null || return 1
   done
   [[ -z "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'journql.*' -print -quit)" ]]
+}
+
+@test "a successful Journal Query keeps diagnostics on stderr" {
+  export JOURNQL_TEST_JOURNALCTL_DIAGNOSTIC='journalctl warning'
+  export JOURNQL_TEST_DUCKDB_DIAGNOSTIC='duckdb diagnostic'
+
+  run --separate-stderr "$command_path" -- -- 'SELECT count(*) FROM journal;'
+
+  assert_success || return 1
+  assert_output '1' || return 1
+  assert_stderr $'journalctl warning\nduckdb diagnostic' || return 1
+}
+
+@test "a Journal Selection failure returns its status and does not start DuckDB" {
+  export JOURNQL_TEST_JOURNALCTL_DIAGNOSTIC='journalctl failure'
+  export JOURNQL_TEST_JOURNALCTL_STATUS=17
+
+  run --separate-stderr "$command_path" -- -- 'SELECT count(*) FROM journal;'
+
+  assert_equal "$status" 17 || return 1
+  assert_output '' || return 1
+  assert_stderr 'journalctl failure' || return 1
+  assert_equal "$(cat "$JOURNQL_TEST_DEPENDENCY_MARKER")" 'journalctl' || return 1
+  [[ ! -e "$JOURNQL_TEST_DUCKDB_INPUT" ]]
+}
+
+@test "a DuckDB failure returns the DuckDB status and keeps its diagnostic on stderr" {
+  export JOURNQL_TEST_DUCKDB_DIAGNOSTIC='duckdb failure'
+  export JOURNQL_TEST_DUCKDB_STATUS=23
+
+  run --separate-stderr "$command_path" -- -- 'SELECT count(*) FROM journal;'
+
+  assert_equal "$status" 23 || return 1
+  assert_output '' || return 1
+  assert_stderr 'duckdb failure' || return 1
+  assert_equal "$(cat "$JOURNQL_TEST_DEPENDENCY_MARKER")" $'journalctl\nduckdb' || return 1
 }
 
 @test "missing Journal Entry fields keep the stable relation and entry JSON" {
@@ -244,16 +295,19 @@ EOF
   run --separate-stderr "$command_path" --unknown -- -- 'SELECT 1'
 
   assert_equal "$status" 2 || return 1
+  assert_output '' || return 1
   assert_stderr --partial 'unknown option: --unknown'
 }
 
 @test "repeated and conflicting journql options fail with status 2" {
   run --separate-stderr "$command_path" --format table --format csv -- -- 'SELECT 1'
   assert_equal "$status" 2 || return 1
+  assert_output '' || return 1
   assert_stderr --partial 'option --format can be used only once' || return 1
 
   run --separate-stderr "$command_path" --help --version
   assert_equal "$status" 2 || return 1
+  assert_output '' || return 1
   assert_stderr --partial '--help and --version cannot be used together'
 }
 
@@ -261,6 +315,7 @@ EOF
   run --separate-stderr "$command_path" --format yaml -- -- 'SELECT 1'
 
   assert_equal "$status" 2 || return 1
+  assert_output '' || return 1
   assert_stderr --partial 'invalid format: yaml' || return 1
   [[ ! -e "$dependency_marker" ]]
 }
