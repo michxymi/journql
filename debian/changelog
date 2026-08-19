@@ -19,7 +19,35 @@ journql (0.1.0+duckdb1.4.5) unstable; urgency=medium
 
   * Use appropriate stripping tool per arch
 
+  * Create debian/changelog file with git-cliff
+
+  * Setup bats unit testing framework
+
+  * Add AGENTS.md
+
+  * Add agent skills doc for PM
+
+  * Add issues for v1 and additional agent docs
+
+  * Define command grammar, help, and version
+
+  * Run a basic journal query
+
+  * Support query result formats
+
+  * Control journal selection
+
+  * Handle abnormal and empty journal selections
+
+  * Preserve diagnostics and failure statuses
+
+  * Secure journal selection snapshot
+
+  * Complete operator documentation
+
+  * Verify Debian release
+
   * Add the journql(1) manual page
 
 
- -- Michael Xymitoulias <michxymi@gmail.com>  Tue, 18 Aug 2026 00:00:00 +0000
+ -- Michael Xymitoulias <michxymi@gmail.com>  Wed, 19 Aug 2026 09:32:53 +0000
