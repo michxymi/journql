@@ -1,0 +1,306 @@
+.TH JOURNQL 1 "" "" "User Commands"
+.SH NAME
+journql \- analyze a systemd Journal Selection with SQL
+.SH SYNOPSIS
+.nf
+journql [OPTIONS] \-\- [JOURNAL SELECTION] \-\- 'JOURNAL QUERY'
+.fi
+.SH DESCRIPTION
+.B journql
+reads Journal Entries that
+.BR journalctl (1)
+selects.
+It makes them available to a Journal Query through an in-memory DuckDB
+database.
+The query uses the stable
+.B journal
+relation and can also read each complete Journal Entry from its
+.B entry
+JSON column.
+.PP
+The command has three parts.
+The first
+.B \-\-
+separator ends
+.B journql
+options.
+The second
+.B \-\-
+separator ends the Journal Selection.
+The Journal Query must be exactly one shell argument after the second
+separator.
+Put the SQL text in single quotes so that the shell supplies it as one
+argument.
+.SH OPTIONS
+.TP
+.B \-\-help
+Show command help and exit.
+Use this option alone.
+.TP
+.B \-\-version
+Show the
+.B journql
+and DuckDB versions and exit.
+Use this option alone.
+.TP
+.BR \-\-format " " FORMAT
+.TQ
+.BI \-\-format= FORMAT
+Select the Query Result format.
+.I FORMAT
+is
+.BR table ,
+.BR csv ,
+or
+.BR json .
+The default is
+.BR table .
+Use this option at most once.
+.SH "JOURNAL SELECTION"
+If the Journal Selection is empty,
+.B journql
+uses the normal
+.B journalctl
+selection.
+It does not add a time limit or a size limit.
+.B journql
+supports the following Journal Selection controls.
+.SS Journal source
+.BR \-\-system ,
+.BR \-\-user ,
+and
+.BR \-\-merge " (" \-m ")."
+.SS Time, cursor, and boot position
+.BR \-\-since " (" \-S "),"
+.BR \-\-until " (" \-U "),"
+.BR \-\-cursor " (" \-c "),"
+.BR \-\-after\-cursor ,
+and
+.BR \-\-boot " (" \-b ")."
+.SS Journal fields
+.BR \-\-unit " (" \-u "),"
+.BR \-\-user\-unit ,
+.BR \-\-identifier " (" \-t "),"
+.BR \-\-priority " (" \-p "),"
+and
+.BR \-\-facility .
+.SS Text and kernel selection
+.BR \-\-grep " (" \-g "),"
+.BR \-\-ignore\-case " (" \-i "),"
+.BR \-\-case\-sensitive[=BOOLEAN] ,
+and
+.BR \-\-dmesg " (" \-k ")."
+.B journql
+passes
+.B \-\-ignore\-case
+and
+.B \-i
+to
+.B journalctl
+as
+.BR \-\-case\-sensitive=no .
+.SS Number and order
+.BR \-\-lines " (" \-n ")"
+and
+.BR \-\-reverse " (" \-r ")."
+.SS Native field matches
+.B journql
+supports Journal field matches such as
+.B MESSAGE=failed
+and the
+.B +
+disjunction operator.
+It does not support path matches.
+.PP
+Options that need a value accept a separate argument.
+.B journql
+also supports the
+.BI \-\-option= value
+form where applicable.
+You can omit the optional values for
+.BR \-\-boot ,
+.BR \-\-lines ,
+and
+.BR \-\-case\-sensitive .
+.B journql
+supports attached values for documented short forms that take a value.
+.PP
+.B journql
+controls the journal data format, complete field values, and pager behavior.
+It rejects other
+.B journalctl
+arguments, including output controls, paging, follow mode, cursor files,
+remote or alternate journal sources, and maintenance commands.
+The command runs
+.B journalctl
+with the authority of the current user.
+.SH "JOURNAL QUERY"
+The Journal Query is SQL that DuckDB runs against an in-memory database.
+It must be exactly one shell argument, but it can contain one or more SQL
+statements.
+.B journql
+does not rewrite the Query Result.
+.B journql
+writes only the Query Result to standard output.
+It writes diagnostics from
+.BR journql ,
+.BR journalctl ,
+and DuckDB to standard error.
+.SH "RESULT FORMATS"
+.TP
+.B table
+Write a table Query Result.
+This is the default.
+.TP
+.B csv
+Write a CSV Query Result with column names.
+.TP
+.B json
+Write a JSON Query Result.
+.SH "JOURNAL RELATION"
+The
+.B journal
+relation has the following stable columns, including when the Journal
+Selection is empty.
+.TS
+tab(|) allbox;
+lb lb lb
+l l l.
+Column|SQL type|Journal Entry field
+timestamp|TIMESTAMPTZ|__REALTIME_TIMESTAMP
+message|VARCHAR|MESSAGE
+hostname|VARCHAR|_HOSTNAME
+systemd_unit|VARCHAR|_SYSTEMD_UNIT
+user_unit|VARCHAR|_SYSTEMD_USER_UNIT
+identifier|VARCHAR|SYSLOG_IDENTIFIER
+priority|INTEGER|PRIORITY
+pid|BIGINT|_PID
+uid|BIGINT|_UID
+gid|BIGINT|_GID
+boot_id|VARCHAR|_BOOT_ID
+transport|VARCHAR|_TRANSPORT
+cursor|VARCHAR|__CURSOR
+entry|JSON|Complete Journal Entry
+.TE
+.PP
+Stable columns use non-throwing conversion.
+A missing, repeated, binary, or invalid stable source value becomes
+.BR NULL .
+The
+.B entry
+column contains the complete original Journal Entry as JSON.
+It includes application-defined fields and values that cannot convert to a
+stable column.
+.SH ENVIRONMENT
+.TP
+.B TMPDIR
+Directory in which to create the private Journal Selection file.
+If you do not set this variable, or if you set it to an empty value,
+.B journql
+uses
+.BR /tmp .
+.TP
+.B PATH
+.B journql
+uses this variable to find
+.BR journalctl .
+The package uses its private DuckDB executable and does not find DuckDB
+through this variable.
+.SH FILES
+.TP
+.B /usr/bin/journql
+The command.
+.TP
+.B /usr/lib/journql/duckdb
+The command's private DuckDB executable.
+.TP
+.BI ${TMPDIR:\-/tmp}/journql. XXXXXXXXXX
+A private, temporary Journal Selection file that contains newline-delimited
+JSON.
+.B journql
+makes the file accessible only to the current user.
+It removes the file after use and on
+.BR HUP ,
+.BR INT ,
+or
+.BR TERM .
+.SH "EXIT STATUS"
+.TP
+.B 0
+The Journal Query completed successfully, or
+.B \-\-help
+or
+.B \-\-version
+completed successfully.
+.TP
+.B 1
+The command could not create the private Journal Selection file.
+.TP
+.B 2
+The command syntax or Journal Selection was not valid.
+.TP
+.B 127
+.B journql
+could not find
+.B journalctl
+or the private DuckDB executable.
+.TP
+.BR 129 , " " 130 , " " 143
+The command received
+.BR HUP ,
+.BR INT ,
+or
+.BR TERM ,
+respectively.
+.PP
+If
+.B journalctl
+or DuckDB fails,
+.B journql
+returns that command's nonzero status.
+.SH LIMITS
+.B journql
+stores the complete Journal Selection as newline-delimited JSON in a temporary
+file before DuckDB starts.
+A large Journal Selection can use temporary disk space approximately equal to
+its JSON size.
+The DuckDB database is in memory.
+If the system has limited disk or memory, select fewer Journal Entries.
+.PP
+This release sets no maximum number of Journal Entries, Journal Selection
+size, or Journal Query size.
+Practical limits come from
+.BR journalctl ,
+the temporary file system, available memory, DuckDB, and the operating system.
+.PP
+The command is read-only.
+It does not write to the journal, provide a persistent cache, or infer SQL
+columns for application-defined fields.
+It does not support remote journals, journal maintenance, interactive paging,
+or follow mode.
+.SH EXAMPLES
+Count the Journal Entries in the Journal Selection:
+.EX
+journql \-\- \-\- 'SELECT count(*) FROM journal;'
+.EE
+.PP
+Select entries for one systemd unit:
+.EX
+journql \-\- \-\-unit sshd.service \-\- \\
+  'SELECT timestamp, message FROM journal ORDER BY timestamp;'
+.EE
+.PP
+Write a JSON Query Result for recent Journal Entries:
+.EX
+journql \-\-format json \-\- \-\-since '1 hour ago' \-\- \\
+  'SELECT priority, count(*) AS count FROM journal GROUP BY priority;'
+.EE
+.PP
+Read an application-defined field from the complete Journal Entry:
+.EX
+journql \-\- \-\- \\
+  "SELECT entry\->>'REQUEST_ID' AS request_id FROM journal;"
+.EE
+.SH "SEE ALSO"
+.BR journalctl (1),
+.BR systemd.journal\-fields (7)

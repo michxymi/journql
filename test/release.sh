@@ -50,6 +50,7 @@ for path in \
     usr/bin/journql \
     usr/lib/journql/duckdb \
     usr/share/lintian/overrides/journql \
+    usr/share/man/man1/journql.1.gz \
     usr/share/doc/journql/copyright \
     usr/share/doc/journql/changelog.gz \
     usr/share/doc/journql/LICENSE \
@@ -57,6 +58,22 @@ for path in \
     usr/share/doc/journql/README.md
 do
     [ -f "$extract_root/$path" ]
+done
+
+manual_page="$extract_root/usr/share/man/man1/journql.1.gz"
+gzip -t "$manual_page"
+manual_text=$(gzip -dc "$manual_page")
+printf '%s\n' "$manual_text" | \
+    grep -F "journql [OPTIONS] \\-\\- [JOURNAL SELECTION] \\-\\- 'JOURNAL QUERY'" >/dev/null
+manual_sections=$(printf '%s\n' "$manual_text" | sed -n \
+    -e 's/^\.SH "\(.*\)"$/\1/p' \
+    -e 's/^\.SH \([^"].*\)$/\1/p')
+for section in \
+    NAME SYNOPSIS DESCRIPTION OPTIONS 'JOURNAL SELECTION' 'JOURNAL QUERY' \
+    'RESULT FORMATS' 'JOURNAL RELATION' ENVIRONMENT FILES 'EXIT STATUS' \
+    LIMITS EXAMPLES 'SEE ALSO'
+do
+    printf '%s\n' "$manual_sections" | grep -Fx "$section" >/dev/null
 done
 
 for path in postinst postrm md5sums; do

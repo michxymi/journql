@@ -48,6 +48,7 @@ stage: fetch-duckdb
 	# CLI (and any other files staged under debian/usr/)
 	cp -r debian/usr $(BUILD_DIR)/
 	chmod 755 $(BUILD_DIR)/usr/bin/journql
+	gzip -n -9 $(BUILD_DIR)/usr/share/man/man1/journql.1
 	install -m 644 debian/copyright $(BUILD_DIR)/usr/share/doc/$(NAME)/copyright
 	install -m 644 $(CHANGELOG_FILE) $(BUILD_DIR)/usr/share/doc/$(NAME)/changelog
 	gzip -n -9 $(BUILD_DIR)/usr/share/doc/$(NAME)/changelog
